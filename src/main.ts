@@ -13,6 +13,6 @@ async function bootstrap() {
     }
   });
   await app.listen();
-  logger.log('User microservice started on port ' + envs.port);
+  logger.log('User microservice started ');
 }
 bootstrap();
