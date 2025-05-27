@@ -8,6 +8,8 @@ pipeline {
         SSH_CRED_ID_DIEGO = 'ssh-key-ec2-diego'
         EC2_USER = 'ubuntu'
         REMOTE_PATH = '/home/ubuntu/user-ms'
+        K8S_REMOTE_PATH = '/home/ubuntu/nest-microservices/k8s/store-ms/templates/user-ms/'
+        IMAGE_NAME = 'fernandoflores07081/user-ms-prod'
     }
 
     stages {
@@ -24,6 +26,11 @@ pipeline {
                     echo "Rama detectada: ${branch}"
 
                     switch(branch) {
+                        case 'main':
+                            env.DEPLOY_ENV = 'production'
+                            env.NODE_ENV = 'production'
+                            env.DOCKER_TAG = "${env.BUILD_NUMBER}"
+                            break
                         case 'qa':
                             env.DEPLOY_ENV = 'qa'
                             env.EC2_IP = '34.194.76.73'
@@ -53,9 +60,49 @@ pipeline {
             }
         }
 
-        stage('Build') {
+        stage('Build Docker Image - Production') {
             when {
-                expression { env.DEPLOY_ENV != 'none' }
+                expression { env.DEPLOY_ENV == 'production' && env.DEPLOY_ENV != 'none' }
+            }
+            steps {
+                script {
+                    sh "docker build -f dockerfile.prod -t ${IMAGE_NAME}:${env.DOCKER_TAG} -t ${IMAGE_NAME}:latest ."
+                }
+            }
+        }
+
+        stage('Push Docker Image - Production') {
+            when {
+                expression { env.DEPLOY_ENV == 'production' && env.DEPLOY_ENV != 'none' }
+            }
+            steps {
+                script {
+                    sh "docker push ${IMAGE_NAME}:${env.DOCKER_TAG}"
+                    sh "docker push ${IMAGE_NAME}:latest"
+                }
+            }
+        }
+
+        stage('Deploy to GKE - Production') {
+            when {
+                expression { env.DEPLOY_ENV == 'production' && env.DEPLOY_ENV != 'none' }
+            }
+            steps {
+                script {
+                    def k8sConfigFile = "${K8S_REMOTE_PATH}deployment.yml"
+                    sh "kubectl apply -f ${k8sConfigFile} --namespace=default"
+                    
+                    sh "kubectl set image deployment/user-ms user-ms-prod=${IMAGE_NAME}:${env.DOCKER_TAG} --namespace=default"
+
+                    // Verificar que el despliegue se complete exitosamente
+                    sh "kubectl rollout status deployment/user-ms --namespace=default"
+                }
+            }
+        }
+
+        stage('Build - Development and QA') {
+            when {
+                expression { env.DEPLOY_ENV != 'none' && env.DEPLOY_ENV != 'production' }
             }
             steps {
                 sh 'rm -rf node_modules'
@@ -64,9 +111,9 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy - Development and QA') {
             when {
-                expression { env.DEPLOY_ENV != 'none' }
+                expression { env.DEPLOY_ENV != 'none' && env.DEPLOY_ENV != 'production' }
             }
             steps {
                 script {
@@ -96,6 +143,17 @@ pipeline {
                     }
                     
                 }
+            }
+        }
+
+        stage('Cleanup Docker - Production') {
+            when {
+                expression { env.DEPLOY_ENV == 'production' }
+            }
+            steps {
+                sh "docker rmi ${IMAGE_NAME}:${env.DOCKER_TAG} || true"
+                sh "docker rmi ${IMAGE_NAME}:latest || true"
+                sh "docker system prune -f || true"
             }
         }
     }

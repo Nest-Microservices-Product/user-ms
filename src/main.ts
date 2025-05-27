@@ -13,6 +13,6 @@ async function bootstrap() {
     }
   });
   await app.listen();
-  logger.log('User microservice started ');
+  logger.log('User microservice started on prod');
 }
 bootstrap();
